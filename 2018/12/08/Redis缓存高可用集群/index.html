@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta name="generator" content="Hexo 3.8.0">
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="keywords" content="hexo,个人博客,blog">
+  <meta name="description" content="邓聪的个人博客">
+  <meta http-equiv="x-dns-prefetch-control" content="on">
+  <link rel="dns-prefetch" href="https://busuanzi.ibruce.info">
+  
+  <link rel="dns-prefetch" href="https://widget.daovoice.io">
+  <link rel="dns-prefetch" href="https://widget-static-cdn.daovoice.io">
+  <link rel="dns-prefetch" href="https://im.daovoice.io">
+  
+  
+  <link rel="dns-prefetch" href="https://hm.baidu.com/">
+  
+  
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <link rel="dns-prefetch" href="https://api.github.com">
+  <link rel="dns-prefetch" href="https://avatars3.githubusercontent.com">
+  
+  <link rel="stylesheet" type="text/css" href="/./style/main.651055.css">
+	<link rel="shortcut icon" href="/favicon.ico" title="Favicon">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.css">
+	<title>Redis缓存高可用集群</title>
+  
+  <script>var _hmt=_hmt||[];(function(){var hm=document.createElement("script");hm.src="https://hm.baidu.com/hm.js?b16e5548649f689d2392c0f02bc58484";var s=document.getElementsByTagName("script")[0];s.parentNode.insertBefore(hm,s);})();
+  </script>
+  
+  
+    <script>(function(i,s,o,g,r,a,m){i["DaoVoiceObject"]=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;a.charset="utf-8";m.parentNode.insertBefore(a,m)})(window,document,"script",('https:' == document.location.protocol ? 'https:' : 'http:') + "//widget.daovoice.io/widget/2803f552.js","daovoice");daovoice('init',{app_id: "2803f552"});daovoice('update');
+  </script>
+  
+</head>
+<body>
+<canvas id="pattern-placeholder" height="230"></canvas>
+<div class="navbar-header">
+  <a class="blog-title" href="/">DcBlog</a>
+  <a class="face-img" href="/">
+    <img src="https://wx.qlogo.cn/mmopen/vi_32/DibNgwPRaVBkWlGTB6aNaR6QJe7nhbWBXNjIT3NoEXM4xQ8FyibHWZNUkk5uCdaWibKbLuqoia0sfH13r4F8GW5FOg/132">
+  </a>
+</div>
+<main>
+  <div class="article-title">
+    
+  
+  <h1 class="title">
+    Redis缓存高可用集群
+  </h1>
+  
+
+
+    <ul class="article-info">
+      <li>
+        发布
+        <time datetime="2018-12-08T06:40:38.000Z" itemprop="datePublished">2018-12-08</time>
+      </li>
+      <li>
+        
+    更新 <time datetime="2018-12-08T07:41:05.611Z" itemprop="dateUpdated">2018-12-08</time>
+
+      </li>
+      <li id="busuanzi_container_page_pv">
+        阅读 <span id="busuanzi_value_page_pv"></span>
+      </li>
+    </ul>
+  </div>
+  <div class="container">
+    <div class="article">
+      <div class="content">
+        <h1 id="Redis集群方案比较"><a href="#Redis集群方案比较" class="headerlink" title="Redis集群方案比较"></a>Redis集群方案比较</h1><ul>
+<li><p>哨兵模式<br><img src="https://vue-admin.oss-cn-hangzhou.aliyuncs.com/dcblog/redis/%E5%93%A8%E5%85%B5%E6%A8%A1%E5%BC%8F.png" alt="哨兵模式"></p>
+<blockquote>
+<p>在redis3.0以前的版本要实现集群一般是借助哨兵sentinel工具来监控master节点的状态，如果master节点异常，则会做主从切换，将某一台slave作为master，哨兵的配置略微复杂，并且性能和高可用性等各方面表现一般，特别是在主从切换的瞬间存在访问瞬断的情况，而且哨兵模式只有一个主节点对外提供服务，没法支持很高的并发，且单个主节点内存也不宜设置得过大，否则会导致持久化文件过大，影响数据恢复或主从同步的效率</p>
+</blockquote>
+</li>
+<li><p>高可用集群模式</p>
+</li>
+<li><img src="https://vue-admin.oss-cn-hangzhou.aliyuncs.com/dcblog/redis/%E9%AB%98%E5%8F%AF%E7%94%A8%E9%9B%86%E7%BE%A4%E6%A8%A1%E5%BC%8F.png" alt="高可用集群模式"><blockquote>
+<p>redis集群是一个由多个主从节点群组成的分布式服务器群，它具有复制、高可用和分片特性。Redis集群不需要sentinel哨兵也能完成节点移除和故障转移的功能。需要将每个节点设置成集群模式，这种集群模式没有中心节点，可水平扩展，据官方文档称可以线性扩展到上万个节点(官方推荐不超过1000个节点)。redis集群的性能和高可用性均优于之前版本的哨兵模式，且集群配置非常简单</p>
+</blockquote>
+<h1 id="Redis高可用集群搭建"><a href="#Redis高可用集群搭建" class="headerlink" title="Redis高可用集群搭建"></a>Redis高可用集群搭建</h1></li>
+<li><p>redis安装</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 安装gcc</span></span><br><span class="line">yum install gcc</span><br><span class="line"><span class="comment"># 下载好的redis-5.0.2.tar.gz</span></span><br><span class="line">wget http://download.redis.io/releases/redis-5.0.2.tar.gz tar xzf redis-5.0.2.tar.gz</span><br><span class="line"><span class="comment"># 解压</span></span><br><span class="line">tar -zxvf redis-5.0.2.tar.gz</span><br><span class="line"><span class="comment"># 进入目录</span></span><br><span class="line"><span class="built_in">cd</span> redis-5.0.2</span><br><span class="line"><span class="comment"># 编译与安装</span></span><br><span class="line">make &amp; make install</span><br><span class="line"><span class="comment"># 启动并指定配置文件 src/redis-server redis.conf（注意要使用后台启动，所以修改redis.conf里的daemonize改为yes)</span></span><br><span class="line">src/redis-server redis.conf</span><br><span class="line"><span class="comment"># 验证启动是否成功  </span></span><br><span class="line">ps -ef | grep redis</span><br><span class="line"><span class="comment"># 使用客户端连接</span></span><br><span class="line">src/redis-cli</span><br><span class="line"><span class="comment"># 退出客户端 quit</span></span><br><span class="line"><span class="comment"># 退出redis服务</span></span><br><span class="line">pkill redis-server</span><br><span class="line">src/redis-cli shutdown</span><br><span class="line"><span class="built_in">kill</span> pid</span><br></pre></td></tr></table></figure>
+</li>
+<li><p>redis集群搭建</p>
+<blockquote>
+<p>redis集群需要至少要三个master节点，我们这里搭建三个master节点，并且给每个master再搭建一个slave节点，总共6个redis节点，这里用三台机器部署6个redis实例，每台机器一主一从，搭建集群的步骤如下</p>
+</blockquote>
+<h2 id="第一步："><a href="#第一步：" class="headerlink" title="第一步："></a>第一步：</h2><blockquote>
+<p>在第一台机器的/usr/local下创建文件夹redis-cluster，然后在其下面分别创建2个文件夾如下<br>（1）mkdir -p /usr/local/redis-cluster<br>（2）mkdir 8001、 mkdir 8004  </p>
+</blockquote>
+<h2 id="第二步："><a href="#第二步：" class="headerlink" title="第二步："></a>第二步：</h2><blockquote>
+<p>把之前的redis.conf配置文件copy到8001下，修改如下内容：<br>（1）daemonize yes<br>（2）port 8001（分别对每个机器的端口号进行设置）<br>（3）dir /usr/local/redis-cluster/8001/（指定数据文件存放位置，必须要指定不同的目录位置，不然会丢失数据）<br>（4）cluster-enabled yes（启动集群模式）<br>（5）cluster-config-file nodes-8001.conf（集群节点信息文件，这里800x最好和port对应上）<br>（6）cluster-node-timeout 5000<br>(7)  # bind 127.0.0.1（去掉bind绑定访问ip信息）<br>(8)  protected-mode  no   （关闭保护模式）<br>（9） appendonly yes<br>如果要设置密码需要增加如下配置：<br>（10）requirepass zhuge     (设置redis访问密码)<br>（11）masterauth zhuge      (设置集群节点间访问密码，跟上面一致)  </p>
+</blockquote>
+<h2 id="第三步："><a href="#第三步：" class="headerlink" title="第三步："></a>第三步：</h2><blockquote>
+<p>把修改后的配置文件，copy到8002，修改第2、3、5项里的端口号，可以用批量替换：:%s/源字符串/目的字符串/g</p>
+</blockquote>
+</li>
+</ul>
+<h2 id="第四步："><a href="#第四步：" class="headerlink" title="第四步："></a>第四步：</h2><blockquote>
+<p>另外两台机器也需要做上面几步操作，第二台机器用8002和8005，第三台机器用8003和8006</p>
+</blockquote>
+<h2 id="第五步："><a href="#第五步：" class="headerlink" title="第五步："></a>第五步：</h2><blockquote>
+<p>分别启动6个redis实例，然后检查是否启动成功<br>（1）/usr/local/redis-5.0.2/src/redis-server /usr/local/redis-cluster/800*/redis.conf<br>（2）ps -ef | grep redis 查看是否启动成功</p>
+</blockquote>
+<h2 id="第六步："><a href="#第六步：" class="headerlink" title="第六步："></a>第六步：</h2><blockquote>
+<p>用redis-cli创建整个redis集群(redis5以前的版本集群是依靠ruby脚本redis-trib.rb实现)<br>（1）/usr/local/redis-5.0.2/src/redis-cli -a zhuge –cluster create –cluster-replicas 1 192.168.0.61:8001 192.168.0.62:8002 192.168.0.63:8003 192.168.0.61:8004 192.168.0.62:8005 192.168.0.63:8006 代表为每个创建的主服务器节点创建一个从服务器节点  </p>
+</blockquote>
+<h2 id="第七步：验证集群："><a href="#第七步：验证集群：" class="headerlink" title="第七步：验证集群："></a>第七步：验证集群：</h2><blockquote>
+<p>（1）连接任意一个客户端即可：./redis-cli -c -h -p (-a访问服务端密码，-c表示集群模式，指定ip地址和端口号）如：/usr/local/redis-5.0.2/src/redis-cli -a zhuge -c -h 192.168.0.61 -p 800<em><br>（2）进行验证： cluster info（查看集群信息）、cluster nodes（查看节点列表）<br>（3）进行数据操作验证<br>（4）关闭集群则需要逐个进行关闭，使用命令： /usr/local/redis/bin/redis-cli -a zhuge -c -h 192.168.0.60 -p 800</em> shutdown</p>
+</blockquote>
+
+      </div>
+        <div class="support-author">
+          <p>感谢您的阅读。 🙏
+          <a href="https://888.com/index.html" target="_blank">关于转载请看这里</a>
+            <!--<a class="btn-pay"  href="#pay-modal">¥ 打赏支持</a>-->
+          </p>
+        </div>
+        <!--
+            <div class="like ">
+              <div class="like-button">
+                <a id="like-note" href="">
+                  <i class="icon-heart"></i>喜欢
+                </a>
+              </div>
+              <span id="likes-count">256</span>
+            </div>
+        -->
+        <div class="otherLink">
+          <div class="previous">
+          </div>
+          <div class="next">
+          </div>
+        </div>
+        <div class="comments" id="comments">
+          
+<script src="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.min.js"></script>
+<script type="text/javascript">
+  const gitalk = new Gitalk({
+    clientID: 'b2393282560a6463ab7d',
+    clientSecret: '49e47c92c7846f4113d66e20ff8b32ce549e379e',
+    repo: 'denglvl.github.io',
+    owner: 'DengLVL',
+    admin: ['DengLVL'],
+    id: location.pathname,      // Ensure uniqueness and length less than 50
+    distractionFreeMode: false
+  })
+
+  gitalk.render('comments');
+</script>
+
+
+        </div>
+      </div>
+    </div>
+   
+</main>
+<div class="footer">
+  <div class="info">
+    <p>
+    <a href="https://hexo.io"> Hexo </a> 强力驱动 |
+      <a href="https://github.com/Youthink/hexo-themes-yearn"> Yearn </a>
+      主题
+    </p>
+    <p>&copy;2013-2018 邓聪的博客 京ICP备xxxxxx号</p>
+  </div>
+</div>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+<script type="text/javascript" src="/./js/main.651055.js"></script>
+
+</body>
+</html>
